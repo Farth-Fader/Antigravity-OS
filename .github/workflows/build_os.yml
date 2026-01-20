@@ -1,5 +1,6 @@
 name: Build Symbiotic Pop!_OS
 
+# Force git update for new account build
 on:
   workflow_dispatch:
     inputs:
@@ -11,7 +12,6 @@ on:
 jobs:
   build-iso:
     runs-on: ubuntu-latest
-    privileged: true
     
     steps:
     - name: Checkout Repo
@@ -53,7 +53,9 @@ jobs:
         # Install Open Interpreter (The Agent)
         pip3 install open-interpreter
         
-        # Install Mouse Without Borders (if available via Wine/snap) or equivalent
+        # Install Barrier / Input Leap (Mouse Sharing)
+        apt-get install -y barrier
+        
         # System cleanup
         apt-get clean
         EOF
