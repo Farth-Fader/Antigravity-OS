@@ -1,0 +1,87 @@
+name: Build Symbiotic Pop!_OS
+
+on:
+  workflow_dispatch:
+    inputs:
+      iso_url:
+        description: 'URL to Pop!_OS ISO (NVIDIA)'
+        required: true
+        default: 'https://iso.pop-os.org/22.04/amd64/nvidia/35/pop-os_22.04_amd64_nvidia_35.iso'
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    privileged: true
+    
+    steps:
+    - name: Checkout Repo
+      uses: actions/checkout@v3
+
+    - name: Install Build Tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xorriso squashfs-tools casper git python3-pip
+
+    - name: Download ISO
+      run: |
+        wget -O original.iso "${{ inputs.iso_url }}"
+
+    - name: Extract ISO
+      run: |
+        mkdir -p isofiles
+        xorriso -osirrox on -indev original.iso -extract / isofiles
+
+    - name: Extract SquashFS
+      run: |
+        mkdir -p squashfs-root
+        sudo unsquashfs -d squashfs-root isofiles/casper/filesystem.squashfs
+
+    - name: Inject Symbiotic Agent (Chroot)
+      run: |
+        # Prepare chroot
+        sudo cp /etc/resolv.conf squashfs-root/etc/
+        sudo mount --bind /dev squashfs-root/dev
+        
+        # Run commands inside the OS image
+        sudo chroot squashfs-root /bin/bash <<EOF
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update
+        
+        # Install Python & Tools
+        apt-get install -y python3-pip git curl network-manager
+        
+        # Install Open Interpreter (The Agent)
+        pip3 install open-interpreter
+        
+        # Install Mouse Without Borders (if available via Wine/snap) or equivalent
+        # System cleanup
+        apt-get clean
+        EOF
+        
+        # Cleanup chroot
+        sudo umount squashfs-root/dev
+        sudo rm squashfs-root/etc/resolv.conf
+
+    - name: Repack SquashFS
+      run: |
+        sudo rm isofiles/casper/filesystem.squashfs
+        sudo mksquashfs squashfs-root isofiles/casper/filesystem.squashfs
+
+    - name: Rebuild ISO
+      run: |
+        xorriso -as mkisofs \
+          -r -V "SymbioticOS" \
+          -J -joliet-long \
+          -b isolinux/isolinux.bin \
+          -c isolinux/boot.cat \
+          -no-emul-boot -boot-load-size 4 -boot-info-table \
+          -eltorito-alt-boot -e boot/grub/efi.img -no-emul-boot \
+          -o symbiotic-pop-os.iso \
+          isofiles
+
+    - name: Upload ISO Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Symbiotic-Pop-OS-ISO
+        path: symbiotic-pop-os.iso
+        compression-level: 0 # Faster upload for large files
